@@ -1,0 +1,608 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Run To Escape</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html,body { height:100%; background:#1a1330; overflow:hidden; font-family:'Comic Sans MS','Chalkboard SE','Segoe UI',sans-serif; }
+  #wrap { position:relative; width:100%; height:100%; display:flex; align-items:center; justify-content:center; }
+  canvas { background:#e8dcc8; display:block; max-width:100%; max-height:100%; touch-action:none; }
+  .overlay {
+    position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center;
+    text-align:center; color:#fff; background:rgba(20,12,45,.92); z-index:5; padding:20px; overflow-y:auto;
+  }
+  .hidden { display:none !important; }
+  h1 { font-size:min(11vw,58px); color:#ffd93d; text-shadow:4px 4px 0 #d33; letter-spacing:2px; margin-bottom:10px; animation:wobble 1.2s ease-in-out infinite alternate; }
+  @keyframes wobble { from{transform:rotate(-2deg) scale(1);} to{transform:rotate(2deg) scale(1.05);} }
+  h2 { font-size:min(8vw,36px); color:#ffd93d; text-shadow:3px 3px 0 #7a4a00; margin-bottom:6px; }
+  p { font-size:min(5vw,21px); margin:8px 0; max-width:520px; line-height:1.4; }
+  button {
+    font-family:inherit; font-size:min(6vw,24px); font-weight:bold; padding:12px 34px; margin-top:18px;
+    border:none; border-radius:50px; background:#ffd93d; color:#5a2d00; cursor:pointer;
+    box-shadow:0 6px 0 #c9a000; transition:transform .1s;
+  }
+  button:active { transform:translateY(4px); box-shadow:0 2px 0 #c9a000; }
+  .coinline { font-size:min(8vw,38px); color:#ffd93d; font-weight:bold; margin:6px 0; }
+  .lvl { font-size:min(6vw,26px); color:#7cf78a; font-weight:bold; }
+  #cutText { font-size:min(6.5vw,28px); font-weight:bold; text-shadow:2px 2px 0 #000; min-height:2.5em; }
+  #teacherFace { font-size:min(34vw,160px); transition:transform 2.2s ease; transform:scale(.5); }
+  #teacherFace.zoom { transform:scale(1.5); filter:drop-shadow(0 0 30px rgba(255,40,40,.8)); }
+  #skipBtn { position:absolute; bottom:18px; right:18px; font-size:16px; padding:8px 20px; margin:0; }
+
+  /* MENU button on top */
+  #menuBtn {
+    position:absolute; top:10px; left:50%; transform:translateX(-50%);
+    z-index:4; font-size:18px; padding:8px 26px; margin:0;
+    background:#6c5ce7; color:#fff; box-shadow:0 5px 0 #3d2fa8;
+  }
+  #menuBtn:active { transform:translateX(-50%) translateY(4px); box-shadow:0 1px 0 #3d2fa8; }
+
+  /* PAUSE button */
+  #pauseBtn {
+    position:absolute; top:64px; right:14px;
+    z-index:4; font-size:18px; padding:8px 18px; margin:0;
+    background:#ff9f43; color:#5a2d00; box-shadow:0 5px 0 #c26b0c;
+  }
+  #pauseBtn:active { transform:translateY(4px); box-shadow:0 1px 0 #c26b0c; }
+
+  /* SHOP cards */
+  .shop { display:flex; gap:14px; flex-wrap:wrap; justify-content:center; margin:14px 0; }
+  .item {
+    background:#2d2158; border:3px solid #ffd93d; border-radius:18px; padding:14px 16px; width:min(42vw,190px);
+  }
+  .item .icon { font-size:44px; }
+  .item .name { font-weight:bold; font-size:18px; color:#ffd93d; margin:4px 0; }
+  .item .desc { font-size:14px; line-height:1.3; min-height:3.6em; }
+  .item .own { font-size:15px; color:#7cf78a; margin-top:6px; }
+  .item button { font-size:17px; padding:8px 18px; margin-top:8px; }
+  .item button:disabled { background:#888; color:#ddd; box-shadow:0 4px 0 #555; cursor:not-allowed; }
+  #shopMsg { min-height:1.4em; font-weight:bold; color:#7cf78a; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <canvas id="game" width="420" height="700"></canvas>
+
+  <button id="menuBtn">☰ MENU</button>
+  <button id="pauseBtn">⏸ PAUSE</button>
+
+  <!-- PAUSE SCREEN -->
+  <div id="pauseScreen" class="overlay hidden">
+    <h1 style="animation:none;">⏸ PAUSED</h1>
+    <p>The teacher is waiting... take your time! 😅</p>
+    <button id="resumeBtn">▶ KEEP RUNNING</button>
+    <button id="pauseShopBtn" style="background:#6c5ce7;color:#fff;box-shadow:0 6px 0 #3d2fa8;">🛒 SHOP</button>
+  </div>
+
+  <!-- TITLE SCREEN -->
+  <div id="titleScreen" class="overlay">
+    <h1>🏃 RUN TO ESCAPE 🏃</h1>
+    <p>The teacher caught you in the hallway...<br>Run for <b>30 seconds</b> to escape!</p>
+    <p>⬅️ ➡️ arrows or tap left / right to switch lanes.<br>Dodge stuff 🪣 or the teacher gets closer! Grab 🪙!</p>
+    <p>Spend coins in the <b>☰ MENU</b> shop for power-ups!</p>
+    <button id="startBtn">PLAY</button>
+  </div>
+
+  <!-- MENU / SHOP -->
+  <div id="menuScreen" class="overlay hidden">
+    <h2>☰ MENU</h2>
+    <div class="coinline">Your coins: 🪙 <span id="shopCoins">0</span></div>
+    <h2 style="font-size:min(6vw,26px);">🛒 POWER-UP SHOP</h2>
+    <div class="shop">
+      <div class="item">
+        <div class="icon">🔥</div>
+        <div class="name">Speed Boost</div>
+        <div class="desc">Run super fast for the whole level — the teacher falls behind way quicker!</div>
+        <div class="own">Owned: <span id="ownSpeed">0</span></div>
+        <button id="buySpeed">Buy — 🪙 50</button>
+      </div>
+      <div class="item">
+        <div class="icon">🛡️</div>
+        <div class="name">Shield</div>
+        <div class="desc">Blocks 2 hits! Crash into obstacles and take NO damage while it lasts.</div>
+        <div class="own">Owned: <span id="ownShield">0</span></div>
+        <button id="buyShield">Buy — 🪙 75</button>
+      </div>
+      <div class="item">
+        <div class="icon">🧲</div>
+        <div class="name">Coin Magnet</div>
+        <div class="desc">Coins fly to you from ANY lane! You don't even have to touch them.</div>
+        <div class="own">Owned: <span id="ownMagnet">0</span></div>
+        <button id="buyMagnet">Buy — 🪙 60</button>
+      </div>
+      <div class="item">
+        <div class="icon">❄️</div>
+        <div class="name">Teacher Freeze</div>
+        <div class="desc">Freezes the teacher for the first 10 seconds — she CAN'T get closer, even if you crash!</div>
+        <div class="own">Owned: <span id="ownFreeze">0</span></div>
+        <button id="buyFreeze">Buy — 🪙 80</button>
+      </div>
+      <div class="item">
+        <div class="icon">✨</div>
+        <div class="name">Double Coins</div>
+        <div class="desc">Every coin is worth 20 instead of 10, AND your escape bonus is DOUBLED!</div>
+        <div class="own">Owned: <span id="ownDbl">0</span></div>
+        <button id="buyDbl">Buy — 🪙 100</button>
+      </div>
+    </div>
+    <p id="shopMsg"></p>
+    <p style="font-size:15px;opacity:.8;">Power-ups turn on automatically at the start of your next run (1 of each is used).</p>
+    <button id="closeMenuBtn">▶ BACK TO GAME</button>
+  </div>
+
+  <!-- CUTSCENE -->
+  <div id="cutscene" class="overlay hidden">
+    <div id="teacherFace">👩‍🏫</div>
+    <p id="cutText"></p>
+    <button id="skipBtn">Skip ▶</button>
+  </div>
+
+  <!-- ESCAPED SCREEN -->
+  <div id="winScreen" class="overlay hidden">
+    <h1>YOU ESCAPED! 🎉</h1>
+    <div class="coinline" id="winCoins">🪙 +0</div>
+    <div class="lvl" id="winLevel"></div>
+    <p id="winTotal"></p>
+    <button id="nextBtn">NEXT LEVEL ▶</button>
+    <button id="winShopBtn" style="background:#6c5ce7;color:#fff;box-shadow:0 6px 0 #3d2fa8;">🛒 SHOP</button>
+  </div>
+
+  <!-- CAUGHT SCREEN -->
+  <div id="loseScreen" class="overlay hidden">
+    <h1 style="color:#ff6b6b; text-shadow:4px 4px 0 #600;">CAUGHT! 😱</h1>
+    <p>"DETENTION!!!" the teacher yells...</p>
+    <p id="loseTotal"></p>
+    <button id="retryBtn">TRY AGAIN 🔁</button>
+    <button id="loseShopBtn" style="background:#6c5ce7;color:#fff;box-shadow:0 6px 0 #3d2fa8;">🛒 SHOP</button>
+  </div>
+</div>
+
+<script>
+const cvs = document.getElementById('game');
+const ctx = cvs.getContext('2d');
+const W = cvs.width, H = cvs.height;
+
+function fit(){
+  const s = Math.min(innerWidth/W, innerHeight/H);
+  cvs.style.width = W*s+'px';
+  cvs.style.height = H*s+'px';
+}
+addEventListener('resize', fit); fit();
+
+// ----- state -----
+const LANES = [W*0.22, W*0.5, W*0.78];
+const ESCAPE_TIME = 30;
+let level = 1, totalCoins = 0;
+let inventory = { speed:0, shield:0, magnet:0, freeze:0, dbl:0 };
+let running = false, paused = false;
+let player, obstacles, coins, timeLeft, teacherGap, runCoins, spawnTimer, coinTimer, speed, shake, tLast, floorScroll, sceneT;
+let speedActive = false, shieldHits = 0, shieldFlash = 0;
+let magnetActive = false, freezeTime = 0, doubleActive = false, coinValue = 10;
+let bonusRound = false;
+
+function resetRun(){
+  player = { lane:1, x:LANES[1], y:H-140, bob:0, hurt:0 };
+  obstacles = []; coins = [];
+  timeLeft = ESCAPE_TIME;
+  teacherGap = 1;
+  runCoins = 0;
+  spawnTimer = 0; coinTimer = 0;
+  speed = 260 + level*40;
+  shake = 0; floorScroll = 0; sceneT = 0;
+  shieldFlash = 0;
+
+  // use power-ups (1 of each owned type)
+  speedActive = false; shieldHits = 0;
+  magnetActive = false; freezeTime = 0; doubleActive = false; coinValue = 10;
+  if(inventory.speed > 0){ inventory.speed--; speedActive = true; speed += 90; }
+  if(inventory.shield > 0){ inventory.shield--; shieldHits = 2; }
+  if(inventory.magnet > 0){ inventory.magnet--; magnetActive = true; }
+  if(inventory.freeze > 0){ inventory.freeze--; freezeTime = 10; }
+  if(inventory.dbl > 0){ inventory.dbl--; doubleActive = true; coinValue = 20; }
+
+  // BONUS ROUND every 5 levels — everything coin is DOUBLED (stacks with ✨!)
+  bonusRound = (level % 5 === 0);
+  if(bonusRound) coinValue *= 2;
+}
+
+// ----- input -----
+function move(dir){
+  if(!running || paused) return;
+  player.lane = Math.max(0, Math.min(2, player.lane + dir));
+}
+addEventListener('keydown', e=>{
+  if(e.key==='ArrowLeft'||e.key==='a') move(-1);
+  if(e.key==='ArrowRight'||e.key==='d') move(1);
+});
+cvs.addEventListener('pointerdown', e=>{
+  const r = cvs.getBoundingClientRect();
+  move((e.clientX - r.left) / r.width < .5 ? -1 : 1);
+});
+
+// ----- screens -----
+const $ = id=>document.getElementById(id);
+const show = el=>el.classList.remove('hidden');
+const hide = el=>el.classList.add('hidden');
+
+$('startBtn').onclick = ()=>{ hide($('titleScreen')); playCutscene(); };
+$('retryBtn').onclick = ()=>{ hide($('loseScreen')); playCutscene(); };
+$('nextBtn').onclick  = ()=>{ hide($('winScreen'));  playCutscene(); };
+
+// ----- MENU / SHOP -----
+let menuReturn = null; // which overlay to go back to (null = game or title)
+function refreshShop(){
+  $('shopCoins').textContent = totalCoins;
+  $('ownSpeed').textContent = inventory.speed;
+  $('ownShield').textContent = inventory.shield;
+  $('ownMagnet').textContent = inventory.magnet;
+  $('ownFreeze').textContent = inventory.freeze;
+  $('ownDbl').textContent = inventory.dbl;
+  $('buySpeed').disabled  = totalCoins < 50;
+  $('buyShield').disabled = totalCoins < 75;
+  $('buyMagnet').disabled = totalCoins < 60;
+  $('buyFreeze').disabled = totalCoins < 80;
+  $('buyDbl').disabled    = totalCoins < 100;
+}
+function openMenu(from){
+  menuReturn = from || null;
+  if(running && !paused){ paused = true; }
+  $('shopMsg').textContent = '';
+  refreshShop();
+  // hide other overlays while menu is open
+  ['titleScreen','winScreen','loseScreen'].forEach(id=>hide($(id)));
+  show($('menuScreen'));
+}
+function closeMenu(){
+  hide($('menuScreen'));
+  if(menuReturn){ show($(menuReturn)); menuReturn = null; return; }
+  if(running && paused){
+    paused = false;
+    tLast = performance.now();
+    requestAnimationFrame(loop);
+  } else if(!running){
+    show($('titleScreen'));
+  }
+}
+$('menuBtn').onclick = ()=>{
+  // if a menu is already open, close it instead
+  if(!$('menuScreen').classList.contains('hidden')){ closeMenu(); return; }
+  // figure out where we are
+  if(!$('winScreen').classList.contains('hidden')) return openMenu('winScreen');
+  if(!$('loseScreen').classList.contains('hidden')) return openMenu('loseScreen');
+  if(!$('pauseScreen').classList.contains('hidden')) return openMenu('pauseScreen');
+  if(!$('cutscene').classList.contains('hidden')) return; // no menu during cutscene
+  if(!$('titleScreen').classList.contains('hidden')) return openMenu(null);
+  openMenu(null); // during gameplay -> pauses
+};
+$('closeMenuBtn').onclick = closeMenu;
+$('winShopBtn').onclick  = ()=>openMenu('winScreen');
+$('loseShopBtn').onclick = ()=>openMenu('loseScreen');
+$('pauseShopBtn').onclick = ()=>openMenu('pauseScreen');
+
+// ----- PAUSE -----
+function pauseGame(){
+  if(!running || paused) return;
+  paused = true;
+  show($('pauseScreen'));
+}
+function resumeGame(){
+  hide($('pauseScreen'));
+  if(running && paused && $('menuScreen').classList.contains('hidden')){
+    paused = false;
+    tLast = performance.now();
+    requestAnimationFrame(loop);
+  }
+}
+$('pauseBtn').onclick = ()=>{
+  // only works during a run; acts as resume if already paused on pause screen
+  if(!$('pauseScreen').classList.contains('hidden')){ resumeGame(); return; }
+  pauseGame();
+};
+$('resumeBtn').onclick = resumeGame;
+addEventListener('keydown', e=>{
+  if(e.key==='p' || e.key==='P' || e.key===' ' || e.key==='Escape'){
+    if(!running) return;
+    if(!$('menuScreen').classList.contains('hidden')) return; // menu handles itself
+    if(paused) resumeGame(); else pauseGame();
+    e.preventDefault();
+  }
+});
+
+function buy(item, cost, name){
+  if(totalCoins < cost){
+    $('shopMsg').style.color = '#ff8a8a';
+    $('shopMsg').textContent = 'Not enough coins! Escape more levels! 🏃';
+    return;
+  }
+  totalCoins -= cost;
+  inventory[item]++;
+  $('shopMsg').style.color = '#7cf78a';
+  $('shopMsg').textContent = name + ' bought! It turns on next run! ✅';
+  refreshShop();
+}
+$('buySpeed').onclick  = ()=>buy('speed', 50, '🔥 Speed Boost');
+$('buyShield').onclick = ()=>buy('shield', 75, '🛡️ Shield');
+$('buyMagnet').onclick = ()=>buy('magnet', 60, '🧲 Coin Magnet');
+$('buyFreeze').onclick = ()=>buy('freeze', 80, '❄️ Teacher Freeze');
+$('buyDbl').onclick    = ()=>buy('dbl', 100, '✨ Double Coins');
+
+// ----- cutscene -----
+let cutTimers = [];
+function playCutscene(){
+  const cs = $('cutscene'), face = $('teacherFace'), txt = $('cutText');
+  show(cs);
+  face.classList.remove('zoom');
+  txt.textContent = '';
+  cutTimers.forEach(clearTimeout); cutTimers = [];
+  const lines = [
+    [300,  ()=>{ txt.textContent = 'You sneak into the hallway...'; }],
+    [1800, ()=>{ txt.textContent = 'The teacher turns around... 👀'; face.classList.add('zoom'); }],
+    [3600, ()=>{ txt.textContent = '"HEY!! NO RUNNING IN— WAIT, GET BACK HERE!!"'; }],
+    [5200, ()=>{
+      if(level % 5 === 0){
+        txt.innerHTML = '<span style="font-size:1.6em;color:#ffd93d;">⭐ BONUS ROUND!! ⭐<br>DOUBLE COINS — RUN!!! 🏃💨</span>';
+      } else {
+        txt.innerHTML = '<span style="font-size:1.8em;color:#ffd93d;">RUN!!! 🏃💨</span>';
+      }
+    }],
+    [6300, startRun],
+  ];
+  lines.forEach(([t,f])=>cutTimers.push(setTimeout(f,t)));
+}
+$('skipBtn').onclick = ()=>{ cutTimers.forEach(clearTimeout); startRun(); };
+
+function startRun(){
+  hide($('cutscene'));
+  resetRun();
+  running = true; paused = false;
+  tLast = performance.now();
+  requestAnimationFrame(loop);
+}
+
+// ----- game over / win -----
+function escapeWin(){
+  running = false;
+  let reward = level * 100 * (doubleActive ? 2 : 1);
+  if(bonusRound) reward *= 2;   // bonus round doubles it again!
+  totalCoins += reward;
+  let tags = '';
+  if(bonusRound) tags += ' ⭐BONUS ROUND x2!⭐';
+  if(doubleActive) tags += ' ✨DOUBLED!✨';
+  $('winCoins').textContent = '🪙 +' + reward + ' escape bonus' + tags + ' (+' + (runCoins*coinValue) + ' from coins you grabbed)';
+  $('winLevel').textContent = 'Level ' + level + ' complete! → Level ' + (level+1);
+  $('winTotal').textContent = 'Total coins: 🪙 ' + totalCoins;
+  level++;
+  show($('winScreen'));
+}
+function caught(){
+  running = false;
+  $('loseTotal').textContent = 'You still kept the 🪙 ' + (runCoins*coinValue) + ' coins you grabbed! Total: 🪙 ' + totalCoins + ' — try again!';
+  show($('loseScreen'));
+}
+
+// ----- spawning -----
+function spawnObstacle(){
+  const stuff = ['🪣','🎒','🗑️','📚','🧹','🛒'];
+  obstacles.push({ lane:(Math.random()*3)|0, y:-60, e:stuff[(Math.random()*stuff.length)|0] });
+}
+function spawnCoin(){
+  const lane = (Math.random()*3)|0;
+  coins.push({ lane:lane, x:LANES[lane], y:-40, spin:0 });
+}
+
+// ----- main loop -----
+function loop(t){
+  if(!running || paused) return;
+  let dt = Math.min((t - tLast)/1000, 0.05);
+  tLast = t;
+  sceneT += dt;
+
+  timeLeft -= dt;
+  if(timeLeft <= 0){ draw(); escapeWin(); return; }
+
+  spawnTimer -= dt;
+  if(spawnTimer <= 0){ spawnObstacle(); spawnTimer = Math.max(0.45, 1.1 - level*0.06) + Math.random()*0.4; }
+  coinTimer -= dt;
+  if(coinTimer <= 0){
+    spawnCoin();
+    coinTimer = bonusRound ? (0.3 + Math.random()*0.4) : (0.8 + Math.random()*0.8);
+  }
+
+  // teacher creeps back — MUCH faster recovery with speed boost
+  if(freezeTime > 0) freezeTime -= dt;
+  teacherGap = Math.min(1, teacherGap + dt*(speedActive ? 0.07 : 0.015));
+
+  const targetX = LANES[player.lane];
+  player.x += (targetX - player.x) * Math.min(1, dt*14);
+  player.bob += dt*(speedActive ? 20 : 14);
+  if(player.hurt>0) player.hurt -= dt;
+  if(shieldFlash>0) shieldFlash -= dt;
+
+  floorScroll = (floorScroll + speed*dt) % 80;
+
+  for(let i=obstacles.length-1;i>=0;i--){
+    const o = obstacles[i];
+    o.y += speed*dt;
+    if(Math.abs(o.y - player.y) < 42 && o.lane === player.lane && player.hurt<=0){
+      obstacles.splice(i,1);
+      if(shieldHits > 0){
+        shieldHits--;          // shield blocks it!
+        shieldFlash = 0.6;
+        player.hurt = 0.4;
+        continue;
+      }
+      if(freezeTime > 0){      // teacher is frozen — she can't lunge!
+        player.hurt = 0.4;
+        shake = 0.15;
+        continue;
+      }
+      teacherGap -= 0.28;
+      player.hurt = 0.8;
+      shake = 0.35;
+      if(teacherGap <= 0){ draw(); caught(); return; }
+      continue;
+    }
+    if(o.y > H+60) obstacles.splice(i,1);
+  }
+
+  for(let i=coins.length-1;i>=0;i--){
+    const c = coins[i];
+    c.y += speed*dt; c.spin += dt*8;
+    // magnet pulls nearby coins right to you!
+    if(magnetActive && c.y > player.y - 220 && c.y < player.y + 60){
+      c.x += (player.x - c.x) * Math.min(1, dt*8);
+    }
+    if(Math.abs(c.y - player.y) < 42 && Math.abs(c.x - player.x) < 42){
+      coins.splice(i,1); runCoins++;
+      totalCoins += coinValue;   // coins count RIGHT AWAY — you keep them no matter what!
+      continue;
+    }
+    if(c.y > H+60) coins.splice(i,1);
+  }
+
+  if(shake>0) shake -= dt;
+
+  draw();
+  requestAnimationFrame(loop);
+}
+
+// ----- drawing -----
+function draw(){
+  ctx.save();
+  if(shake>0) ctx.translate((Math.random()-.5)*12*shake*3, (Math.random()-.5)*12*shake*3);
+
+  ctx.fillStyle = bonusRound ? '#f7e8b0' : '#e8dcc8'; ctx.fillRect(-20,-20,W+40,H+40);
+  ctx.fillStyle = bonusRound ? '#ffd97a' : '#b6d7e4'; ctx.fillRect(-20,-20,W*0.09+20,H+40); ctx.fillRect(W*0.91,-20,W*0.09+20,H+40);
+  ctx.fillStyle = bonusRound ? '#e6b84f' : '#8fb8c9'; ctx.fillRect(W*0.09-6,-20,6,H+40); ctx.fillRect(W*0.91,-20,6,H+40);
+
+  ctx.font = '26px serif'; ctx.textAlign='center'; ctx.textBaseline='middle';
+  for(let y=-80+floorScroll; y<H+80; y+=80){
+    ctx.fillText('🚪', W*0.045, y);
+    ctx.fillText('🚪', W*0.955, y);
+  }
+
+  ctx.strokeStyle = 'rgba(120,100,70,.35)'; ctx.lineWidth = 3;
+  for(let y=-80+floorScroll; y<H+80; y+=80){
+    ctx.beginPath(); ctx.moveTo(W*0.09,y); ctx.lineTo(W*0.91,y); ctx.stroke();
+  }
+  ctx.strokeStyle = 'rgba(120,100,70,.15)';
+  ctx.beginPath(); ctx.moveTo(W*0.36,0); ctx.lineTo(W*0.36,H); ctx.moveTo(W*0.64,0); ctx.lineTo(W*0.64,H); ctx.stroke();
+
+  for(const c of coins){
+    const s = 30 + Math.sin(c.spin)*4;
+    ctx.font = s+'px serif';
+    ctx.fillText('🪙', c.x, c.y);
+    if(doubleActive){ ctx.font = '14px serif'; ctx.fillText('✨', c.x + 18, c.y - 16); }
+  }
+  ctx.font = '42px serif';
+  for(const o of obstacles) ctx.fillText(o.e, LANES[o.lane], o.y);
+
+  // TEACHER
+  const tY = 70 + (1-teacherGap)*260;
+  const tSize = 46 + (1-teacherGap)*70;
+  const frozen = freezeTime > 0;
+  const tX = frozen
+    ? W/2
+    : W/2 + Math.sin(sceneT*3)*30*teacherGap + (player.x-W/2)*(1-teacherGap)*0.6;
+  if(frozen){
+    // ice block around her!
+    ctx.fillStyle = 'rgba(140,220,255,.45)';
+    ctx.strokeStyle = 'rgba(60,160,230,.9)'; ctx.lineWidth = 3;
+    const bw = tSize*1.2, bh = tSize*1.2;
+    ctx.beginPath();
+    if(ctx.roundRect) ctx.roundRect(tX-bw/2, tY-bh/2, bw, bh, 10); else ctx.rect(tX-bw/2, tY-bh/2, bw, bh);
+    ctx.fill(); ctx.stroke();
+  }
+  ctx.font = tSize+'px serif';
+  ctx.fillText('👩‍🏫', tX, tY);
+  if(frozen){
+    ctx.font = '24px serif';
+    ctx.fillText('❄️', tX - tSize*0.6, tY - tSize*0.5);
+    ctx.fillText('❄️', tX + tSize*0.6, tY + tSize*0.3);
+    ctx.font = 'bold 16px sans-serif'; ctx.fillStyle = '#1e6fa8';
+    ctx.fillText('FROZEN! ' + Math.ceil(freezeTime) + 's', tX, tY + tSize*0.85);
+  } else if(teacherGap < 0.45){
+    ctx.font = 'bold 18px sans-serif'; ctx.fillStyle='#c0392b';
+    ctx.fillText('"GET BACK HERE!!"', tX, tY - tSize*0.75);
+  }
+
+  // player
+  if(!(player.hurt>0 && shieldHits===0 && shieldFlash<=0 && Math.floor(player.hurt*12)%2===0)){
+    ctx.save();
+    ctx.translate(player.x, player.y + Math.sin(player.bob)*4);
+    // shield bubble
+    if(shieldHits > 0 || shieldFlash > 0){
+      ctx.beginPath();
+      ctx.arc(0, -4, 36, 0, Math.PI*2);
+      ctx.fillStyle = shieldFlash > 0 ? 'rgba(120,200,255,.55)' : 'rgba(120,200,255,.22)';
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(80,170,255,.9)'; ctx.lineWidth = 3; ctx.stroke();
+    }
+    ctx.font = '46px serif';
+    ctx.save(); ctx.scale(-1,1); ctx.fillText('🏃', 0, 0); ctx.restore();
+    ctx.restore();
+    // trail: fire when boosted, dust normally
+    ctx.font = speedActive ? '24px serif' : '18px serif';
+    ctx.fillText(speedActive ? '🔥' : '💨', player.x, player.y - 36);
+    if(speedActive){ ctx.font='18px serif'; ctx.fillText('🔥', player.x, player.y + 28); }
+  }
+
+  ctx.restore();
+
+  // HUD
+  if(bonusRound){
+    const flash = Math.sin(sceneT*6) > 0;
+    ctx.textAlign='center'; ctx.textBaseline='top';
+    ctx.font = 'bold 22px sans-serif';
+    ctx.fillStyle = flash ? '#c9860a' : '#e74c3c';
+    ctx.fillText('⭐ BONUS ROUND — DOUBLE COINS! ⭐', W/2, 66);
+  }
+  ctx.textAlign='left'; ctx.textBaseline='top';
+  ctx.font = 'bold 22px sans-serif'; ctx.fillStyle = '#3b2a1a';
+  ctx.fillText('Level ' + level, 14, 12);
+  ctx.fillText('🪙 ' + totalCoins, 14, 40);
+  ctx.font = 'bold 15px sans-serif';
+  ctx.fillText('+' + (runCoins*coinValue) + ' this run', 14, 66);
+  ctx.font = 'bold 22px sans-serif';
+
+  // active power-up icons
+  let px = 14, py = 90;
+  ctx.font = '20px serif';
+  if(speedActive){ ctx.fillText('🔥', px, py); px += 28; }
+  if(magnetActive){ ctx.fillText('🧲', px, py); px += 28; }
+  if(doubleActive){ ctx.fillText('✨', px, py); px += 28; }
+  if(freezeTime > 0){
+    ctx.fillText('❄️', px, py);
+    ctx.font = 'bold 14px sans-serif';
+    ctx.fillText(Math.ceil(freezeTime)+'s', px + 24, py + 4);
+    px += 52; ctx.font = '20px serif';
+  }
+  if(shieldHits > 0){
+    ctx.fillText('🛡️', px, py);
+    ctx.font = 'bold 14px sans-serif';
+    ctx.fillText('x' + shieldHits, px + 24, py + 4);
+  }
+
+  const frac = Math.max(0, timeLeft/ESCAPE_TIME);
+  ctx.textAlign='right'; ctx.font = 'bold 22px sans-serif'; ctx.fillStyle = '#3b2a1a';
+  ctx.fillText('⏱ ' + Math.ceil(Math.max(0,timeLeft)) + 's', W-14, 12);
+  ctx.fillStyle = '#00000022'; ctx.fillRect(W-174, 44, 160, 14);
+  ctx.fillStyle = frac > .3 ? '#4caf50' : '#e74c3c';
+  ctx.fillRect(W-174, 44, 160*frac, 14);
+
+  ctx.textAlign='center'; ctx.font='bold 15px sans-serif';
+  ctx.fillStyle = '#3b2a1a';
+  ctx.fillText('TEACHER DISTANCE', W/2, H-34);
+  ctx.fillStyle = '#00000022'; ctx.fillRect(W/2-90, H-16, 180, 10);
+  ctx.fillStyle = teacherGap > .4 ? '#4caf50' : '#e74c3c';
+  ctx.fillRect(W/2-90, H-16, 180*teacherGap, 10);
+}
+
+resetRun(); inventory = { speed:0, shield:0, magnet:0, freeze:0, dbl:0 };
+speedActive=false; shieldHits=0; magnetActive=false; freezeTime=0; doubleActive=false; coinValue=10;
+draw();
+</script>
+</body>
+</html>
