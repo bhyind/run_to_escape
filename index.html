@@ -93,6 +93,7 @@
     <p>⬅️ ➡️ arrows or tap left / right to switch lanes.<br>Dodge stuff 🪣 or the teacher gets closer! Grab 🪙!</p>
     <p>Spend coins in the <b>☰ MENU</b> shop for power-ups!</p>
     <button id="startBtn">PLAY</button>
+    <button id="bossBtn1" style="background:#c0392b;color:#fff;box-shadow:0 6px 0 #7a1010;">😈 BOSS FIGHT</button>
   </div>
 
   <!-- MENU / SHOP -->
@@ -169,6 +170,7 @@
     <div class="lvl" id="winLevel"></div>
     <p id="winTotal"></p>
     <button id="nextBtn">NEXT LEVEL ▶</button>
+    <button id="bossBtn2" style="background:#c0392b;color:#fff;box-shadow:0 6px 0 #7a1010;">😈 BOSS FIGHT</button>
     <button id="winShopBtn" style="background:#6c5ce7;color:#fff;box-shadow:0 6px 0 #3d2fa8;">🛒 SHOP</button>
   </div>
 
@@ -178,6 +180,7 @@
     <p id="loseLine">"DETENTION!!!" the teacher yells...</p>
     <p id="loseTotal"></p>
     <button id="retryBtn">TRY AGAIN 🔁</button>
+    <button id="bossBtn3" style="background:#c0392b;color:#fff;box-shadow:0 6px 0 #7a1010;">😈 BOSS FIGHT</button>
     <button id="loseShopBtn" style="background:#6c5ce7;color:#fff;box-shadow:0 6px 0 #3d2fa8;">🛒 SHOP</button>
   </div>
 </div>
@@ -218,6 +221,7 @@ function sfxCoin(){ tone(880,0,.07,'square',.10); tone(1318,.07,.12,'square',.10
 function sfxWin(){ tone(523,0,.15,'triangle',.22); tone(659,.15,.15,'triangle',.22); tone(784,.3,.45,'triangle',.26); } // doo doo DOOO!
 function sfxLose(){ tone(420,0,.35,'sawtooth',.14,280); tone(280,.35,.6,'sawtooth',.14,140); }        // sad wooop wooop
 function sfxHit(){ tone(160,0,.15,'square',.2,70); }                                                  // bonk!
+function sfxBoom(){ tone(90,0,.7,'sawtooth',.35,25); tone(60,.1,.9,'square',.3,20); }                 // BOOM!!!
 
 // ----- CHASERS — a new one every 10 levels, each with their own lines! -----
 const CHASERS = [
@@ -270,6 +274,7 @@ const SKINS = [
   { id:'unicorn',   e:'🦄', name:'Unicorn',    price:700, desc:'Majestic AND fast.' },
   { id:'dragon',    e:'🐉', name:'Dragon',     price:800, desc:'Why run when you can FLY?' },
   { id:'king',      e:'👑', name:'The Crown',  price:1000, desc:'Royalty. The rarest skin of all.' },
+  { id:'slayer',    e:'⚔️', name:'Slayer',     price:0, secret:true, desc:'SECRET SKIN — earned by defeating THE BOSS! 😈💥' },
 ];
 let ownedSkins = { runner:true };
 let currentSkin = 'runner';
@@ -285,11 +290,12 @@ let player, obstacles, coins, timeLeft, teacherGap, runCoins, spawnTimer, coinTi
 let speedActive = false, shieldHits = 0, shieldFlash = 0;
 let magnetActive = false, freezeTime = 0, doubleActive = false, coinValue = 10;
 let bonusRound = false;
+let bossLevel = false, runTime = 30, bossDying = 0, fireTimer = 0;
+let bossOverride = false;   // set by the 😈 BOSS FIGHT button
 
 function resetRun(){
   player = { lane:1, x:LANES[1], y:H-140, bob:0, hurt:0 };
   obstacles = []; coins = [];
-  timeLeft = ESCAPE_TIME;
   teacherGap = 1;
   runCoins = 0;
   spawnTimer = 0; coinTimer = 0;
@@ -306,8 +312,14 @@ function resetRun(){
   if(inventory.freeze > 0){ inventory.freeze--; freezeTime = 15; }
   if(inventory.dbl > 0){ inventory.dbl--; doubleActive = true; coinValue = 20; }
 
-  // BONUS ROUND every 5 levels — everything coin is DOUBLED (stacks with ✨!)
-  bonusRound = (level % 5 === 0);
+  // BOSS LEVEL every 10 levels — or from the 😈 BOSS FIGHT button!
+  bossLevel = bossOverride || (level % 10 === 0);
+  runTime = bossLevel ? 60 : 30;
+  timeLeft = runTime;
+  bossDying = 0; fireTimer = 2;
+
+  // BONUS ROUND every 5 levels (unless it's a boss level) — coins DOUBLED (stacks with ✨!)
+  bonusRound = (level % 5 === 0) && !bossLevel;
   if(bonusRound) coinValue *= 2;
 }
 
@@ -333,6 +345,16 @@ const hide = el=>el.classList.add('hidden');
 $('startBtn').onclick = ()=>{ hide($('titleScreen')); playCutscene(); };
 $('retryBtn').onclick = ()=>{ hide($('loseScreen')); playCutscene(); };
 $('nextBtn').onclick  = ()=>{ hide($('winScreen'));  playCutscene(); };
+
+// 😈 BOSS FIGHT buttons — jump straight into the boss battle!
+function startBossFight(fromId){
+  bossOverride = true;
+  hide($(fromId));
+  playCutscene();
+}
+$('bossBtn1').onclick = ()=>startBossFight('titleScreen');
+$('bossBtn2').onclick = ()=>startBossFight('winScreen');
+$('bossBtn3').onclick = ()=>startBossFight('loseScreen');
 
 // ----- MENU / SHOP -----
 let menuReturn = null; // which overlay to go back to (null = game or title)
@@ -447,6 +469,7 @@ function renderSkins(){
   const box = $('skinShop');
   box.innerHTML = '';
   for(const s of SKINS){
+    if(s.secret && !ownedSkins[s.id]) continue;   // secret skins stay hidden until earned!
     const card = document.createElement('div');
     card.className = 'item';
     const owned = !!ownedSkins[s.id];
@@ -496,24 +519,36 @@ function playCutscene(){
   const cs = $('cutscene'), face = $('teacherFace'), txt = $('cutText');
   show(cs);
   face.classList.remove('zoom');
-  face.textContent = chaser().e;
+  face.textContent = bossLevelNext() ? '😈' : chaser().e;
   txt.textContent = '';
   cutTimers.forEach(clearTimeout); cutTimers = [];
-  const lines = [
-    [300,  ()=>{ txt.textContent = 'You sneak into the hallway...'; }],
-    [1800, ()=>{ txt.textContent = 'Then ' + chaser().name + ' turns around... 👀'; face.classList.add('zoom'); }],
-    [3600, ()=>{ txt.textContent = chaser().spot; }],
-    [5200, ()=>{
-      if(level % 5 === 0){
-        txt.innerHTML = '<span style="font-size:1.6em;color:#ffd93d;">⭐ BONUS ROUND!! ⭐<br>DOUBLE COINS — RUN!!! 🏃💨</span>';
-      } else {
-        txt.innerHTML = '<span style="font-size:1.8em;color:#ffd93d;">RUN!!! 🏃💨</span>';
-      }
-    }],
-    [6300, startRun],
-  ];
+  let lines;
+  if(bossLevelNext()){
+    lines = [
+      [300,  ()=>{ txt.textContent = 'The ground starts to shake...'; }],
+      [1800, ()=>{ txt.textContent = 'THE BOSS blocks the hallway!! 😈'; face.classList.add('zoom'); }],
+      [3600, ()=>{ txt.textContent = '"I WILL ELIMINATE YOU, STUDENT!!!"'; }],
+      [5200, ()=>{ txt.innerHTML = '<span style="font-size:1.6em;color:#ff6b6b;">⚠️ BOSS LEVEL ⚠️<br>SURVIVE 60 SECONDS!!! 🏃💨</span>'; }],
+      [6600, startRun],
+    ];
+  } else {
+    lines = [
+      [300,  ()=>{ txt.textContent = 'You sneak into the hallway...'; }],
+      [1800, ()=>{ txt.textContent = 'Then ' + chaser().name + ' turns around... 👀'; face.classList.add('zoom'); }],
+      [3600, ()=>{ txt.textContent = chaser().spot; }],
+      [5200, ()=>{
+        if(level % 5 === 0){
+          txt.innerHTML = '<span style="font-size:1.6em;color:#ffd93d;">⭐ BONUS ROUND!! ⭐<br>DOUBLE COINS — RUN!!! 🏃💨</span>';
+        } else {
+          txt.innerHTML = '<span style="font-size:1.8em;color:#ffd93d;">RUN!!! 🏃💨</span>';
+        }
+      }],
+      [6300, startRun],
+    ];
+  }
   lines.forEach(([t,f])=>cutTimers.push(setTimeout(f,t)));
 }
+function bossLevelNext(){ return bossOverride || level % 10 === 0; }
 $('skipBtn').onclick = ()=>{ cutTimers.forEach(clearTimeout); startRun(); };
 
 function startRun(){
@@ -527,10 +562,20 @@ function startRun(){
 // ----- game over / win -----
 function escapeWin(){
   running = false;
+  bossOverride = false;
   sfxWin();
   const c = chaser();   // the one you JUST escaped from
   $('winSay').textContent = c.e + ' ' + c.escaped;
   let reward = level * 100 * (doubleActive ? 2 : 1);
+  if(bossLevel){
+    reward += 500;   // boss bonus!
+    let say = '😈 "NO!!! NOOOOO!!!" 💥 THE BOSS EXPLODES!!! 💥';
+    if(!ownedSkins.slayer){
+      ownedSkins.slayer = true;
+      say += ' — 🔓 SECRET SKIN UNLOCKED: ⚔️ SLAYER! Check the skin shop!';
+    }
+    $('winSay').textContent = say;
+  }
   if(bonusRound) reward *= 2;   // bonus round doubles it again!
   totalCoins += reward;
   let tags = '';
@@ -540,6 +585,8 @@ function escapeWin(){
   level++;
   let lvlText = 'Level ' + (level-1) + ' complete! → Level ' + level;
   if(level % 10 === 0){
+    lvlText += ' — ⚠️ WARNING: LEVEL ' + level + ' IS A BOSS LEVEL!! 😈 Survive 60 seconds!';
+  } else if(level % 10 === 1 && level > 1){
     lvlText += ' — UH OH... now ' + chaser().name.toUpperCase() + ' ' + chaser().e + ' is chasing you!';
   }
   $('winLevel').textContent = lvlText;
@@ -548,8 +595,11 @@ function escapeWin(){
 }
 function caught(){
   running = false;
+  bossOverride = false;
   sfxLose();
-  $('loseLine').textContent = chaser().caught + ' — ' + chaser().name + ' ' + chaser().e;
+  $('loseLine').textContent = bossLevel
+    ? '"ELIMINATED!!! MWAHAHAHA!!!" — THE BOSS 😈'
+    : chaser().caught + ' — ' + chaser().name + ' ' + chaser().e;
   $('loseTotal').textContent = 'You still kept the 🪙 ' + (runCoins*coinValue) + ' coins you grabbed! Total: 🪙 ' + totalCoins + ' — try again!';
   show($('loseScreen'));
 }
@@ -575,13 +625,35 @@ function loop(t){
     freezeTime -= dt;      // counts down in real time (10 real seconds)
     dt *= 0.5;             // ...but the whole world moves at half speed
   }
+  // 💥 boss exploding sequence!
+  if(bossDying > 0){
+    bossDying -= dt;
+    sceneT += dt;
+    shake = 0.5;
+    draw();
+    if(bossDying <= 0){ escapeWin(); return; }
+    requestAnimationFrame(loop);
+    return;
+  }
   sceneT += dt;
 
   timeLeft -= dt;
-  if(timeLeft <= 0){ draw(); escapeWin(); return; }
+  if(timeLeft <= 0){
+    if(bossLevel){ sfxBoom(); bossDying = 2.2; draw(); requestAnimationFrame(loop); return; }
+    draw(); escapeWin(); return;
+  }
 
   spawnTimer -= dt;
   if(spawnTimer <= 0){ spawnObstacle(); spawnTimer = Math.max(0.45, 1.1 - level*0.06) + Math.random()*0.4; }
+
+  // 😈 boss shoots fireballs AT YOUR LANE!
+  if(bossLevel){
+    fireTimer -= dt;
+    if(fireTimer <= 0){
+      obstacles.push({ lane:player.lane, y:-40, e:'🔥', proj:true });
+      fireTimer = Math.max(0.7, 1.5 - level*0.01) + Math.random()*0.4;
+    }
+  }
   coinTimer -= dt;
   if(coinTimer <= 0){
     spawnCoin();
@@ -601,7 +673,7 @@ function loop(t){
 
   for(let i=obstacles.length-1;i>=0;i--){
     const o = obstacles[i];
-    o.y += speed*dt;
+    o.y += speed*dt*(o.proj ? 1.4 : 1);
     if(Math.abs(o.y - player.y) < 42 && o.lane === player.lane && player.hurt<=0){
       obstacles.splice(i,1);
       sfxHit();
@@ -647,9 +719,9 @@ function draw(){
   ctx.save();
   if(shake>0) ctx.translate((Math.random()-.5)*12*shake*3, (Math.random()-.5)*12*shake*3);
 
-  ctx.fillStyle = bonusRound ? '#f7e8b0' : '#e8dcc8'; ctx.fillRect(-20,-20,W+40,H+40);
-  ctx.fillStyle = bonusRound ? '#ffd97a' : '#b6d7e4'; ctx.fillRect(-20,-20,W*0.09+20,H+40); ctx.fillRect(W*0.91,-20,W*0.09+20,H+40);
-  ctx.fillStyle = bonusRound ? '#e6b84f' : '#8fb8c9'; ctx.fillRect(W*0.09-6,-20,6,H+40); ctx.fillRect(W*0.91,-20,6,H+40);
+  ctx.fillStyle = bossLevel ? '#e8c2c2' : (bonusRound ? '#f7e8b0' : '#e8dcc8'); ctx.fillRect(-20,-20,W+40,H+40);
+  ctx.fillStyle = bossLevel ? '#d98484' : (bonusRound ? '#ffd97a' : '#b6d7e4'); ctx.fillRect(-20,-20,W*0.09+20,H+40); ctx.fillRect(W*0.91,-20,W*0.09+20,H+40);
+  ctx.fillStyle = bossLevel ? '#a84f4f' : (bonusRound ? '#e6b84f' : '#8fb8c9'); ctx.fillRect(W*0.09-6,-20,6,H+40); ctx.fillRect(W*0.91,-20,6,H+40);
 
   ctx.font = '26px serif'; ctx.textAlign='center'; ctx.textBaseline='middle';
   for(let y=-80+floorScroll; y<H+80; y+=80){
@@ -673,19 +745,31 @@ function draw(){
   ctx.font = '42px serif';
   for(const o of obstacles) ctx.fillText(o.e, LANES[o.lane], o.y);
 
-  // TEACHER
+  // TEACHER (or THE BOSS 😈)
   const tY = 70 + (1-teacherGap)*260;
-  const tSize = 46 + (1-teacherGap)*70;
+  const tSize = (bossLevel ? 66 : 46) + (1-teacherGap)*70;
   const slowmo = freezeTime > 0;
   const tX = W/2 + Math.sin(sceneT*3)*30*teacherGap + (player.x-W/2)*(1-teacherGap)*0.6;
-  ctx.font = tSize+'px serif';
-  ctx.fillText(chaser().e, tX, tY);
-  if(slowmo){
-    ctx.font = 'bold 16px sans-serif'; ctx.fillStyle = '#1e6fa8';
-    ctx.fillText('sooo... slooow...', tX, tY + tSize*0.85);
-  } else if(teacherGap < 0.45){
-    ctx.font = 'bold 18px sans-serif'; ctx.fillStyle='#c0392b';
-    ctx.fillText(chaser().yell, tX, tY - tSize*0.75);
+  if(bossDying > 0){
+    // 💥 THE BOSS EXPLODES!!! 💥
+    const p = 1 - bossDying/2.2;
+    ctx.font = Math.floor(60 + p*220) + 'px serif';
+    ctx.fillText('💥', tX, tY);
+    ctx.font = Math.floor(tSize * Math.max(0.1, 1-p)) + 'px serif';
+    ctx.fillText('😈', tX, tY);
+    ctx.font = 'bold ' + Math.floor(24 + p*20) + 'px sans-serif';
+    ctx.fillStyle = '#c0392b';
+    ctx.fillText('"NO!!! NOOOO!!!"', W/2, tY - 90);
+  } else {
+    ctx.font = tSize+'px serif';
+    ctx.fillText(bossLevel ? '😈' : chaser().e, tX, tY);
+    if(slowmo){
+      ctx.font = 'bold 16px sans-serif'; ctx.fillStyle = '#1e6fa8';
+      ctx.fillText('sooo... slooow...', tX, tY + tSize*0.85);
+    } else if(teacherGap < 0.45){
+      ctx.font = 'bold 18px sans-serif'; ctx.fillStyle='#c0392b';
+      ctx.fillText(bossLevel ? '"I WILL ELIMINATE YOU!!!"' : chaser().yell, tX, tY - tSize*0.75);
+    }
   }
 
   // player
@@ -722,6 +806,13 @@ function draw(){
   }
 
   // HUD
+  if(bossLevel && bossDying <= 0){
+    const flash = Math.sin(sceneT*6) > 0;
+    ctx.textAlign='center'; ctx.textBaseline='top';
+    ctx.font = 'bold 22px sans-serif';
+    ctx.fillStyle = flash ? '#c0392b' : '#7a1010';
+    ctx.fillText('⚠️ BOSS LEVEL — SURVIVE! ⚠️', W/2, 66);
+  }
   if(bonusRound){
     const flash = Math.sin(sceneT*6) > 0;
     ctx.textAlign='center'; ctx.textBaseline='top';
@@ -755,7 +846,7 @@ function draw(){
     ctx.fillText('x' + shieldHits, px + 24, py + 4);
   }
 
-  const frac = Math.max(0, timeLeft/ESCAPE_TIME);
+  const frac = Math.max(0, timeLeft/runTime);
   ctx.textAlign='right'; ctx.font = 'bold 22px sans-serif'; ctx.fillStyle = '#3b2a1a';
   ctx.fillText('⏱ ' + Math.ceil(Math.max(0,timeLeft)) + 's', W-14, 12);
   ctx.fillStyle = '#00000022'; ctx.fillRect(W-174, 44, 160, 14);
