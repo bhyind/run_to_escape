@@ -59,6 +59,16 @@
   .item button { font-size:17px; padding:8px 18px; margin-top:8px; }
   .item button:disabled { background:#888; color:#ddd; box-shadow:0 4px 0 #555; cursor:not-allowed; }
   #shopMsg { min-height:1.4em; font-weight:bold; color:#7cf78a; }
+
+  /* menu tabs */
+  .tabs { display:flex; gap:10px; margin-bottom:10px; }
+  .tabbtn {
+    font-size:17px; padding:8px 20px; margin-top:0; border-radius:14px;
+    background:#453a7a; color:#cfc8ff; box-shadow:0 4px 0 #2a2154;
+  }
+  .tabbtn.active { background:#ffd93d; color:#5a2d00; box-shadow:0 4px 0 #c9a000; }
+  .item button.equipbtn { background:#7cf78a; box-shadow:0 4px 0 #3ba24a; color:#0c4d1a; }
+  .item button.equipped { background:#888; color:#eee; box-shadow:0 4px 0 #555; cursor:default; }
 </style>
 </head>
 <body>
@@ -89,7 +99,12 @@
   <div id="menuScreen" class="overlay hidden">
     <h2>☰ MENU</h2>
     <div class="coinline">Your coins: 🪙 <span id="shopCoins">0</span></div>
-    <h2 style="font-size:min(6vw,26px);">🛒 POWER-UP SHOP</h2>
+    <div class="tabs">
+      <button class="tabbtn active" id="tabPower">🛒 POWER-UPS</button>
+      <button class="tabbtn" id="tabSkins">🎨 SKINS</button>
+    </div>
+
+    <div id="powerTab">
     <div class="shop">
       <div class="item">
         <div class="icon">🔥</div>
@@ -113,9 +128,9 @@
         <button id="buyMagnet">Buy — 🪙 60</button>
       </div>
       <div class="item">
-        <div class="icon">❄️</div>
-        <div class="name">Teacher Freeze</div>
-        <div class="desc">Freezes the teacher for the first 10 seconds — she CAN'T get closer, even if you crash!</div>
+        <div class="icon">🐢</div>
+        <div class="name">Slow-Mo</div>
+        <div class="desc">Slows down TIME for 15 seconds — you, the teacher, EVERYTHING moves at half speed. Easy dodging!</div>
         <div class="own">Owned: <span id="ownFreeze">0</span></div>
         <button id="buyFreeze">Buy — 🪙 80</button>
       </div>
@@ -127,8 +142,15 @@
         <button id="buyDbl">Buy — 🪙 100</button>
       </div>
     </div>
-    <p id="shopMsg"></p>
     <p style="font-size:15px;opacity:.8;">Power-ups turn on automatically at the start of your next run (1 of each is used).</p>
+    </div><!-- /powerTab -->
+
+    <div id="skinTab" class="hidden">
+      <div class="shop" id="skinShop"></div>
+      <p style="font-size:15px;opacity:.8;">Buy a skin once, keep it FOREVER. Tap EQUIP to wear it!</p>
+    </div><!-- /skinTab -->
+
+    <p id="shopMsg"></p>
     <button id="closeMenuBtn">▶ BACK TO GAME</button>
   </div>
 
@@ -142,6 +164,7 @@
   <!-- ESCAPED SCREEN -->
   <div id="winScreen" class="overlay hidden">
     <h1>YOU ESCAPED! 🎉</h1>
+    <p id="winSay" style="font-style:italic; color:#ffb3b3;"></p>
     <div class="coinline" id="winCoins">🪙 +0</div>
     <div class="lvl" id="winLevel"></div>
     <p id="winTotal"></p>
@@ -152,7 +175,7 @@
   <!-- CAUGHT SCREEN -->
   <div id="loseScreen" class="overlay hidden">
     <h1 style="color:#ff6b6b; text-shadow:4px 4px 0 #600;">CAUGHT! 😱</h1>
-    <p>"DETENTION!!!" the teacher yells...</p>
+    <p id="loseLine">"DETENTION!!!" the teacher yells...</p>
     <p id="loseTotal"></p>
     <button id="retryBtn">TRY AGAIN 🔁</button>
     <button id="loseShopBtn" style="background:#6c5ce7;color:#fff;box-shadow:0 6px 0 #3d2fa8;">🛒 SHOP</button>
@@ -170,6 +193,87 @@ function fit(){
   cvs.style.height = H*s+'px';
 }
 addEventListener('resize', fit); fit();
+
+// ----- SOUND EFFECTS (made with Web Audio — no files needed!) -----
+let AC = null;
+function ac(){
+  if(!AC){ try{ AC = new (window.AudioContext||window.webkitAudioContext)(); }catch(e){} }
+  if(AC && AC.state === 'suspended') AC.resume();
+  return AC;
+}
+function tone(freq, start, dur, type, vol, slideTo){
+  const a = ac(); if(!a) return;
+  try{
+    const o = a.createOscillator(), g = a.createGain();
+    o.type = type || 'square';
+    o.frequency.setValueAtTime(freq, a.currentTime + start);
+    if(slideTo) o.frequency.exponentialRampToValueAtTime(slideTo, a.currentTime + start + dur);
+    g.gain.setValueAtTime(vol || 0.15, a.currentTime + start);
+    g.gain.exponentialRampToValueAtTime(0.001, a.currentTime + start + dur);
+    o.connect(g); g.connect(a.destination);
+    o.start(a.currentTime + start); o.stop(a.currentTime + start + dur + 0.05);
+  }catch(e){}
+}
+function sfxCoin(){ tone(880,0,.07,'square',.10); tone(1318,.07,.12,'square',.10); }                 // ding-ding!
+function sfxWin(){ tone(523,0,.15,'triangle',.22); tone(659,.15,.15,'triangle',.22); tone(784,.3,.45,'triangle',.26); } // doo doo DOOO!
+function sfxLose(){ tone(420,0,.35,'sawtooth',.14,280); tone(280,.35,.6,'sawtooth',.14,140); }        // sad wooop wooop
+function sfxHit(){ tone(160,0,.15,'square',.2,70); }                                                  // bonk!
+
+// ----- CHASERS — a new one every 10 levels, each with their own lines! -----
+const CHASERS = [
+  { e:'👩‍🏫', name:'the Teacher',        // levels 1–9
+    spot:'"HEY!! NO RUNNING IN— WAIT, GET BACK HERE!!"',
+    yell:'"GET BACK HERE!!"',
+    caught:'"DETENTION!!! And I\'m calling your parents!"',
+    escaped:'"I\'ll see YOU on Monday, young man!!"' },
+  { e:'👮', name:'the Police Officer',   // levels 10–19
+    spot:'"HALT! You\'re in violation of Hallway Code 5-0!!"',
+    yell:'"STOP! IN THE NAME OF THE LAW!!"',
+    caught:'"You\'re grounded... BY LAW!!"',
+    escaped:'"This isn\'t over, kid! I know your locker number!"' },
+  { e:'🧛', name:'the Vampire',          // levels 20–29
+    spot:'"Ahhh... a student out of class? DELICIOUS."',
+    yell:'"I VANT YOUR HOMEWORK!!"',
+    caught:'"BLEH BLEH BLEH! Detention... FOR ETERNITY!"',
+    escaped:'"CURSES!! Is that... SUNLIGHT?! Hsssss!!"' },
+  { e:'🤖', name:'the Robot',            // levels 30–39
+    spot:'"STUDENT DETECTED. CHASE MODE: ACTIVATED. BEEP."',
+    yell:'"HALT. RESISTANCE. IS. FUTILE."',
+    caught:'"STUDENT. CAPTURED. INITIATING DETENTION.EXE"',
+    escaped:'"ERROR 404. STUDENT NOT FOUND. sad beep..."' },
+  { e:'👹', name:'the Monster',          // levels 40+
+    spot:'"GRRRRR... FRESH STUDENT!!! RAWR!!!"',
+    yell:'"RAAAWR!! COME BAAACK!!"',
+    caught:'"RAAAAWR!!! MONSTER DETENTION!!! (it\'s just regular detention but louder)"',
+    escaped:'"RAWR?? WHERE DID SNACK GO??"' },
+];
+function chaser(){ return CHASERS[Math.min(CHASERS.length-1, Math.floor(level/10))]; }
+
+// ----- SKINS -----
+const SKINS = [
+  { id:'runner',    e:'🏃', name:'Runner',     price:0,   desc:'The classic. Free!' },
+  { id:'ninja',     e:'🥷', name:'Ninja',      price:200, desc:'Sneaky and fast.' },
+  { id:'skater',    e:'🛹', name:'Skater',     price:200, desc:'Cool and smooth.' },
+  { id:'bunny',     e:'🐇', name:'Bunny',      price:250, desc:'Super bouncy!' },
+  { id:'robot',     e:'🤖', name:'Robot',      price:250, desc:'Futuristic and beepy.' },
+  { id:'astronaut', e:'👨‍🚀', name:'Astronaut', price:300, desc:'Exploring space.' },
+  { id:'zombie',    e:'🧟', name:'Zombie',     price:300, desc:'Undead runner.' },
+  { id:'superhero', e:'🦸', name:'Superhero',  price:400, desc:'Cape flowing behind you!' },
+  { id:'gamer',     e:'🎮', name:'Gamer',      price:500, desc:'Relatable!' },
+  { id:'cat',       e:'🐱', name:'Cat',        price:350, desc:'Zoomies mode: ON.' },
+  { id:'dino',      e:'🦖', name:'Dino',       price:400, desc:'RAWR back at the monster!' },
+  { id:'cowboy',    e:'🤠', name:'Cowboy',     price:400, desc:'Yeehaw down the hallway!' },
+  { id:'wizard',    e:'🧙', name:'Wizard',     price:450, desc:'You shall not pass... me!' },
+  { id:'spy',       e:'🕵️', name:'Spy',        price:450, desc:'Top secret hallway mission.' },
+  { id:'alien',     e:'👽', name:'Alien',      price:550, desc:'Not from this school.' },
+  { id:'skeleton',  e:'💀', name:'Skeleton',   price:600, desc:'Running with no legs?! Spooky.' },
+  { id:'unicorn',   e:'🦄', name:'Unicorn',    price:700, desc:'Majestic AND fast.' },
+  { id:'dragon',    e:'🐉', name:'Dragon',     price:800, desc:'Why run when you can FLY?' },
+  { id:'king',      e:'👑', name:'The Crown',  price:1000, desc:'Royalty. The rarest skin of all.' },
+];
+let ownedSkins = { runner:true };
+let currentSkin = 'runner';
+function skinEmoji(){ const s = SKINS.find(s=>s.id===currentSkin); return s ? s.e : '🏃'; }
 
 // ----- state -----
 const LANES = [W*0.22, W*0.5, W*0.78];
@@ -199,7 +303,7 @@ function resetRun(){
   if(inventory.speed > 0){ inventory.speed--; speedActive = true; speed += 90; }
   if(inventory.shield > 0){ inventory.shield--; shieldHits = 2; }
   if(inventory.magnet > 0){ inventory.magnet--; magnetActive = true; }
-  if(inventory.freeze > 0){ inventory.freeze--; freezeTime = 10; }
+  if(inventory.freeze > 0){ inventory.freeze--; freezeTime = 15; }
   if(inventory.dbl > 0){ inventory.dbl--; doubleActive = true; coinValue = 20; }
 
   // BONUS ROUND every 5 levels — everything coin is DOUBLED (stacks with ✨!)
@@ -244,6 +348,7 @@ function refreshShop(){
   $('buyMagnet').disabled = totalCoins < 60;
   $('buyFreeze').disabled = totalCoins < 80;
   $('buyDbl').disabled    = totalCoins < 100;
+  if(!$('skinTab').classList.contains('hidden')) renderSkins();
 }
 function openMenu(from){
   menuReturn = from || null;
@@ -325,8 +430,65 @@ function buy(item, cost, name){
 $('buySpeed').onclick  = ()=>buy('speed', 50, '🔥 Speed Boost');
 $('buyShield').onclick = ()=>buy('shield', 75, '🛡️ Shield');
 $('buyMagnet').onclick = ()=>buy('magnet', 60, '🧲 Coin Magnet');
-$('buyFreeze').onclick = ()=>buy('freeze', 80, '❄️ Teacher Freeze');
+$('buyFreeze').onclick = ()=>buy('freeze', 80, '🐢 Slow-Mo');
 $('buyDbl').onclick    = ()=>buy('dbl', 100, '✨ Double Coins');
+
+// ----- SKIN SHOP -----
+$('tabPower').onclick = ()=>{
+  $('tabPower').classList.add('active'); $('tabSkins').classList.remove('active');
+  show($('powerTab')); hide($('skinTab'));
+};
+$('tabSkins').onclick = ()=>{
+  $('tabSkins').classList.add('active'); $('tabPower').classList.remove('active');
+  show($('skinTab')); hide($('powerTab'));
+  renderSkins();
+};
+function renderSkins(){
+  const box = $('skinShop');
+  box.innerHTML = '';
+  for(const s of SKINS){
+    const card = document.createElement('div');
+    card.className = 'item';
+    const owned = !!ownedSkins[s.id];
+    const equipped = currentSkin === s.id;
+    card.innerHTML =
+      '<div class="icon">' + s.e + '</div>' +
+      '<div class="name">' + s.name + '</div>' +
+      '<div class="desc">' + s.desc + '</div>';
+    const btn = document.createElement('button');
+    if(equipped){
+      btn.textContent = 'EQUIPPED ✓';
+      btn.className = 'equipped';
+      btn.disabled = true;
+    } else if(owned){
+      btn.textContent = 'EQUIP';
+      btn.className = 'equipbtn';
+      btn.onclick = ()=>{
+        currentSkin = s.id;
+        $('shopMsg').style.color = '#7cf78a';
+        $('shopMsg').textContent = 'You are now the ' + s.name + '! ' + s.e;
+        sfxCoin();
+        renderSkins();
+      };
+    } else {
+      btn.textContent = 'Buy — 🪙 ' + s.price;
+      btn.disabled = totalCoins < s.price;
+      btn.onclick = ()=>{
+        if(totalCoins < s.price) return;
+        totalCoins -= s.price;
+        ownedSkins[s.id] = true;
+        currentSkin = s.id;   // auto-equip your new skin!
+        $('shopMsg').style.color = '#7cf78a';
+        $('shopMsg').textContent = s.e + ' ' + s.name + ' bought and equipped! 🎉';
+        sfxWin();
+        refreshShop();
+        renderSkins();
+      };
+    }
+    card.appendChild(btn);
+    box.appendChild(card);
+  }
+}
 
 // ----- cutscene -----
 let cutTimers = [];
@@ -334,12 +496,13 @@ function playCutscene(){
   const cs = $('cutscene'), face = $('teacherFace'), txt = $('cutText');
   show(cs);
   face.classList.remove('zoom');
+  face.textContent = chaser().e;
   txt.textContent = '';
   cutTimers.forEach(clearTimeout); cutTimers = [];
   const lines = [
     [300,  ()=>{ txt.textContent = 'You sneak into the hallway...'; }],
-    [1800, ()=>{ txt.textContent = 'The teacher turns around... 👀'; face.classList.add('zoom'); }],
-    [3600, ()=>{ txt.textContent = '"HEY!! NO RUNNING IN— WAIT, GET BACK HERE!!"'; }],
+    [1800, ()=>{ txt.textContent = 'Then ' + chaser().name + ' turns around... 👀'; face.classList.add('zoom'); }],
+    [3600, ()=>{ txt.textContent = chaser().spot; }],
     [5200, ()=>{
       if(level % 5 === 0){
         txt.innerHTML = '<span style="font-size:1.6em;color:#ffd93d;">⭐ BONUS ROUND!! ⭐<br>DOUBLE COINS — RUN!!! 🏃💨</span>';
@@ -364,6 +527,9 @@ function startRun(){
 // ----- game over / win -----
 function escapeWin(){
   running = false;
+  sfxWin();
+  const c = chaser();   // the one you JUST escaped from
+  $('winSay').textContent = c.e + ' ' + c.escaped;
   let reward = level * 100 * (doubleActive ? 2 : 1);
   if(bonusRound) reward *= 2;   // bonus round doubles it again!
   totalCoins += reward;
@@ -371,13 +537,19 @@ function escapeWin(){
   if(bonusRound) tags += ' ⭐BONUS ROUND x2!⭐';
   if(doubleActive) tags += ' ✨DOUBLED!✨';
   $('winCoins').textContent = '🪙 +' + reward + ' escape bonus' + tags + ' (+' + (runCoins*coinValue) + ' from coins you grabbed)';
-  $('winLevel').textContent = 'Level ' + level + ' complete! → Level ' + (level+1);
-  $('winTotal').textContent = 'Total coins: 🪙 ' + totalCoins;
   level++;
+  let lvlText = 'Level ' + (level-1) + ' complete! → Level ' + level;
+  if(level % 10 === 0){
+    lvlText += ' — UH OH... now ' + chaser().name.toUpperCase() + ' ' + chaser().e + ' is chasing you!';
+  }
+  $('winLevel').textContent = lvlText;
+  $('winTotal').textContent = 'Total coins: 🪙 ' + totalCoins;
   show($('winScreen'));
 }
 function caught(){
   running = false;
+  sfxLose();
+  $('loseLine').textContent = chaser().caught + ' — ' + chaser().name + ' ' + chaser().e;
   $('loseTotal').textContent = 'You still kept the 🪙 ' + (runCoins*coinValue) + ' coins you grabbed! Total: 🪙 ' + totalCoins + ' — try again!';
   show($('loseScreen'));
 }
@@ -397,6 +569,12 @@ function loop(t){
   if(!running || paused) return;
   let dt = Math.min((t - tLast)/1000, 0.05);
   tLast = t;
+
+  // 🐢 SLOW-MO: time itself runs at half speed for everyone!
+  if(freezeTime > 0){
+    freezeTime -= dt;      // counts down in real time (10 real seconds)
+    dt *= 0.5;             // ...but the whole world moves at half speed
+  }
   sceneT += dt;
 
   timeLeft -= dt;
@@ -411,7 +589,6 @@ function loop(t){
   }
 
   // teacher creeps back — MUCH faster recovery with speed boost
-  if(freezeTime > 0) freezeTime -= dt;
   teacherGap = Math.min(1, teacherGap + dt*(speedActive ? 0.07 : 0.015));
 
   const targetX = LANES[player.lane];
@@ -427,15 +604,11 @@ function loop(t){
     o.y += speed*dt;
     if(Math.abs(o.y - player.y) < 42 && o.lane === player.lane && player.hurt<=0){
       obstacles.splice(i,1);
+      sfxHit();
       if(shieldHits > 0){
         shieldHits--;          // shield blocks it!
         shieldFlash = 0.6;
         player.hurt = 0.4;
-        continue;
-      }
-      if(freezeTime > 0){      // teacher is frozen — she can't lunge!
-        player.hurt = 0.4;
-        shake = 0.15;
         continue;
       }
       teacherGap -= 0.28;
@@ -457,6 +630,7 @@ function loop(t){
     if(Math.abs(c.y - player.y) < 42 && Math.abs(c.x - player.x) < 42){
       coins.splice(i,1); runCoins++;
       totalCoins += coinValue;   // coins count RIGHT AWAY — you keep them no matter what!
+      sfxCoin();
       continue;
     }
     if(c.y > H+60) coins.splice(i,1);
@@ -502,30 +676,16 @@ function draw(){
   // TEACHER
   const tY = 70 + (1-teacherGap)*260;
   const tSize = 46 + (1-teacherGap)*70;
-  const frozen = freezeTime > 0;
-  const tX = frozen
-    ? W/2
-    : W/2 + Math.sin(sceneT*3)*30*teacherGap + (player.x-W/2)*(1-teacherGap)*0.6;
-  if(frozen){
-    // ice block around her!
-    ctx.fillStyle = 'rgba(140,220,255,.45)';
-    ctx.strokeStyle = 'rgba(60,160,230,.9)'; ctx.lineWidth = 3;
-    const bw = tSize*1.2, bh = tSize*1.2;
-    ctx.beginPath();
-    if(ctx.roundRect) ctx.roundRect(tX-bw/2, tY-bh/2, bw, bh, 10); else ctx.rect(tX-bw/2, tY-bh/2, bw, bh);
-    ctx.fill(); ctx.stroke();
-  }
+  const slowmo = freezeTime > 0;
+  const tX = W/2 + Math.sin(sceneT*3)*30*teacherGap + (player.x-W/2)*(1-teacherGap)*0.6;
   ctx.font = tSize+'px serif';
-  ctx.fillText('👩‍🏫', tX, tY);
-  if(frozen){
-    ctx.font = '24px serif';
-    ctx.fillText('❄️', tX - tSize*0.6, tY - tSize*0.5);
-    ctx.fillText('❄️', tX + tSize*0.6, tY + tSize*0.3);
+  ctx.fillText(chaser().e, tX, tY);
+  if(slowmo){
     ctx.font = 'bold 16px sans-serif'; ctx.fillStyle = '#1e6fa8';
-    ctx.fillText('FROZEN! ' + Math.ceil(freezeTime) + 's', tX, tY + tSize*0.85);
+    ctx.fillText('sooo... slooow...', tX, tY + tSize*0.85);
   } else if(teacherGap < 0.45){
     ctx.font = 'bold 18px sans-serif'; ctx.fillStyle='#c0392b';
-    ctx.fillText('"GET BACK HERE!!"', tX, tY - tSize*0.75);
+    ctx.fillText(chaser().yell, tX, tY - tSize*0.75);
   }
 
   // player
@@ -541,7 +701,7 @@ function draw(){
       ctx.strokeStyle = 'rgba(80,170,255,.9)'; ctx.lineWidth = 3; ctx.stroke();
     }
     ctx.font = '46px serif';
-    ctx.save(); ctx.scale(-1,1); ctx.fillText('🏃', 0, 0); ctx.restore();
+    ctx.save(); ctx.scale(-1,1); ctx.fillText(skinEmoji(), 0, 0); ctx.restore();
     ctx.restore();
     // trail: fire when boosted, dust normally
     ctx.font = speedActive ? '24px serif' : '18px serif';
@@ -550,6 +710,16 @@ function draw(){
   }
 
   ctx.restore();
+
+  // 🐢 slow-mo tint over everything
+  if(freezeTime > 0){
+    ctx.fillStyle = 'rgba(80,140,255,0.13)';
+    ctx.fillRect(0,0,W,H);
+    ctx.textAlign='center'; ctx.textBaseline='top';
+    ctx.font = 'bold 20px sans-serif';
+    ctx.fillStyle = '#2457c5';
+    ctx.fillText('🐢 SLOW-MO! ' + Math.ceil(freezeTime) + 's 🐢', W/2, 96);
+  }
 
   // HUD
   if(bonusRound){
@@ -574,7 +744,7 @@ function draw(){
   if(magnetActive){ ctx.fillText('🧲', px, py); px += 28; }
   if(doubleActive){ ctx.fillText('✨', px, py); px += 28; }
   if(freezeTime > 0){
-    ctx.fillText('❄️', px, py);
+    ctx.fillText('🐢', px, py);
     ctx.font = 'bold 14px sans-serif';
     ctx.fillText(Math.ceil(freezeTime)+'s', px + 24, py + 4);
     px += 52; ctx.font = '20px serif';
